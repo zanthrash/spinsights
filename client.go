@@ -1,23 +1,170 @@
 package spinsights
 
 import (
-	"net/http"
 	"net/url"
+	"encoding/json"
+	"github.com/parnurzeal/gorequest"
+	"fmt"
+	"github.com/gizak/termui/debug"
+	"bytes"
 )
 
 var DefalutClient = NewClient(nil)
 
 type Client struct {
 	BaseUrl *url.URL
-	ApplicationPath string
 	UserAgent string
-	httpClient *http.Client
+	agent *gorequest.SuperAgent
 }
 
-func NewClient(httpClient *http.Client) *Client {
-	if httpClient == nil {
-		cloned := *http.DefaultClient
-		httpClient = &cloned
+type Execution struct {
+	Application string
+	Status string
+	Name string
+	StartTime int
+	EndTime int
+	ExecutingInstance string
+	Stages []Stage
+	Trigger Trigger
+}
+
+type Context struct {
+	Exception Exception
+}
+
+type Exception struct {
+	Details ExcptionDetails
+}
+
+type ExcptionDetails struct {
+	Error string
+	Errors []string
+	StackTrace string
+}
+
+type Trigger struct {
+	User string
+	Type string
+}
+
+type Stage struct {
+	Type string
+	Name string
+	Status string
+	StartTime int
+	EndTime int
+	Tasks []Task
+	Context Context
+}
+
+type Task struct {
+	Id string
+	Name string
+	StartTime int
+	EndTime int
+	Status string
+}
+
+type SearchResult struct {
+	Results []Instance
+}
+
+type Instance struct {
+	Provider string
+	Type string
+	Account string
+	Region string
+	InstanceId string
+	Application string
+	Cluster string
+	ServerGroup string
+}
+
+type InstanceDetail struct {
+	Name string
+	HealthState string
+	PrivateIpAddress string
+	InsightActions []InsightActions
+}
+
+type InsightActions struct {
+	Url string
+	Label string
+}
+
+func (c *Client) GetExecutionById(id string) (*Execution, error) {
+	rel, err := url.Parse("/pipelines/" + id)
+
+	if err != nil {
+		return &Execution{}, err
+	}
+
+	url := c.BaseUrl.ResolveReference(rel)
+
+	_, body, _:= gorequest.New().Get(url.String()).End()
+
+
+	var execution *Execution
+	json.Unmarshal([]byte(body), &execution)
+
+	return execution, nil
+}
+
+func (c *Client) GetInstanceDetails(instance *Instance) (*InstanceDetail, error) {
+	urlString := fmt.Sprintf("/instances/%s/%s/%s", instance.Account, instance.Region, instance.InstanceId)
+	rel, err := url.Parse(urlString)
+	if err != nil {
+		return &InstanceDetail{}, err
+	}
+
+	url := c.BaseUrl.ResolveReference(rel)
+	_, body, _ := gorequest.New().Get(url.String()).End()
+
+	var instanceDetail *InstanceDetail
+	json.Unmarshal([]byte(body), &instanceDetail)
+	return instanceDetail, nil
+}
+
+func (c *Client) InstanceSearch(instanceId string) (*[]SearchResult, error) {
+	rel, err := url.Parse("/search")
+	if err != nil {
+		return &[]SearchResult{}, err
+	}
+	q := rel.Query()
+	q.Set("q", instanceId)
+	q.Set("type", "instances")
+
+	rel.RawQuery = q.Encode()
+
+	url := c.BaseUrl.ResolveReference(rel)
+
+	debug.Log(url.String())
+	_, body, _ := gorequest.New().Get(url.String()).End()
+
+	prettyPrintJson(body)
+	var results *[]SearchResult
+	json.Unmarshal([]byte(body), &results)
+	return results, nil
+
+}
+
+func unmarshallExecutionJSON(jsonString string) *Execution  {
+	var parsed Execution
+	json.Unmarshal([]byte(jsonString), &parsed)
+	return &parsed
+}
+
+func prettyPrintJson(jsonString string) {
+	var prettyJson bytes.Buffer
+	json.Indent(&prettyJson, []byte(jsonString), "", "    ")
+
+	debug.Log(string(prettyJson.Bytes()))
+}
+
+func NewClient(agent *gorequest.SuperAgent) *Client {
+	if agent == nil {
+		cloned := *gorequest.New()
+		agent = &cloned
 	}
 
 	c := &Client{
@@ -25,20 +172,10 @@ func NewClient(httpClient *http.Client) *Client {
 			Scheme:"https",
 			Host:"spinnaker-api.prod.netflix.net",
 		},
-		ApplicationPath:"/application/",
 		UserAgent:"spinsights.go",
-		httpClient: httpClient,
+		agent: agent,
 	}
 
 	return c
 }
 
-func (c *Client) NewRequest(s string) (*http.Request, error) {
-	rel, err := url.Parse(c.BasePath + s)
-	if err != nil {
-		return nil, err
-	}
-
-
-
-}
