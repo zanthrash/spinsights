@@ -10,38 +10,80 @@ import (
 
 var (
 	client = DefalutClient
+	orcaDetails *InstanceDetail
+	actions = map[string]string{"q":"Quit"}
+	instructions = ui.NewPar("")
+	info = ui.NewList()
+	stages = ui.NewList()
+	exception = ui.NewPar("None")
 )
+
+func drawInstructions() {
+	instructions.Height = 3
+	instructions.BorderLabel = "Spinisghts"
+
+	if orcaDetails != nil {
+		actions["l"] = "Orca Logs"
+	}
+
+	if instructions.Text == "" {
+		for key, action := range actions {
+			instructions.Text += fmt.Sprintf(" %s: %s ", key, action)
+		}
+	}
+
+}
+
+func drawInfo(exe *Execution) {
+	info.BorderLabel = "Info"
+	info.ItemFgColor = ui.ColorYellow
+	info.Items = []string{
+		"Name: " + exe.Name,
+		fmt.Sprintf("Status: [%s]%s",  exe.Status, getStatusColor(exe.Status)),
+	}
+	info.Height = len(info.Items) + 2
+}
+
+func drawStages(exe *Execution) {
+	stages.BorderLabel = "Stages"
+	stages.ItemFgColor = ui.ColorYellow
+	stageList := make([]string, 0)
+
+	exception.Border = false
+	exception.BorderLabel = "Exception"
+	exception.Height = 3
+	exception.Text = ""
+
+	for i := range exe.Stages {
+		stage := exe.Stages[i]
+		statusColor := getStatusColor(stage.Status)
+		stageInfo := fmt.Sprintf("%s [%s]%s", stage.Name, stage.Status, statusColor )
+		stageList = append(stageList, stageInfo)
+
+		if &stage.Context.Exception != nil {
+			exception.Text = fmt.Sprintf("%s \n%s", stage.Context.Exception.Details.Error, stage.Context.Exception.Details.StackTrace)
+			exception.Height = 20
+		}
+
+		for t := range exe.Stages[i].Tasks {
+			task := exe.Stages[i].Tasks[t]
+			statusColor = getStatusColor(task.Status)
+			taskInfo := fmt.Sprintf("  %s [%s]%s", task.Name, task.Status, statusColor)
+			stageList = append(stageList, taskInfo)
+		}
+	}
+	stages.Items = stageList
+	stages.Height = len(stageList) + 2
+}
 
 func RenderPipeline(executionId string) {
 	if err := ui.Init(); err != nil {
 		panic(err)
 	}
 
-	var orcaDetails *InstanceDetail
-
 	defer ui.Close()
+
 	ui.Merge("timer", ui.NewTimerCh(time.Second * 5) )
-
-	instructions := ui.NewPar("Loading...")
-	instructions.Height = 3
-	instructions.BorderLabel = "Spinisghts"
-
-	info := ui.NewList()
-	info.Items = []string{"Loading.."}
-	info.BorderLabel = "Info"
-	info.ItemFgColor = ui.ColorYellow
-	info.Height = 3
-
-	stages := ui.NewList()
-	stages.Items = []string{"Loading.."}
-	stages.BorderLabel = "Stages"
-	stages.ItemFgColor = ui.ColorYellow
-	stages.Height = 3
-
-	exception := ui.NewPar("None")
-	exception.Border = false
-	exception.BorderLabel = "Exception"
-	exception.Height = 3
 
 	ui.Body.AddRows(
 		ui.NewRow(
@@ -60,47 +102,12 @@ func RenderPipeline(executionId string) {
 
 	draw := func(exe *Execution ) {
 		if exe != nil {
-
-			if &orcaDetails != nil {
-				instructions.Text = "l => Orca Logs"
-			}
-
-			info.Items = []string{
-				"Name: " + exe.Name,
-				fmt.Sprintf("Status: [%s]%s",  exe.Status, getStatusColor(exe.Status)),
-			}
-			info.Height = len(info.Items) + 2
-
-			stageList := make([]string, 0)
-			exception.Text = ""
-
-			for i := range exe.Stages {
-				stage := exe.Stages[i]
-				statusColor := getStatusColor(stage.Status)
-				stageInfo := fmt.Sprintf("%s [%s]%s", stage.Name, stage.Status, statusColor )
-				stageList = append(stageList, stageInfo)
-
-				if &stage.Context.Exception != nil {
-					exception.Text = fmt.Sprintf("%s \n%s", stage.Context.Exception.Details.Error, stage.Context.Exception.Details.StackTrace)
-					exception.Height = 20
-				}
-
-				for t := range exe.Stages[i].Tasks {
-					task := exe.Stages[i].Tasks[t]
-					statusColor = getStatusColor(task.Status)
-					taskInfo := fmt.Sprintf("  %s [%s]%s", task.Name, task.Status, statusColor)
-					stageList = append(stageList, taskInfo)
-				}
-			}
-			stages.Items = stageList
-			stages.Height = len(stageList) + 2
-
-
-			exception.Height = 20
-
+			drawInstructions()
+			drawInfo(exe)
+			drawStages(exe)
 			ui.Body.Align()
-
 		}
+
 		ui.Render(ui.Body)
 	}
 
@@ -108,9 +115,12 @@ func RenderPipeline(executionId string) {
 		execution, _ := client.GetExecutionById(executionId)
 
 		if orcaDetails == nil {
+			debug.Log("fetching orca details\n")
 			searchResults, _ := client.InstanceSearch(execution.ExecutingInstance)
-			result := (*searchResults)[0].Results[0]
-			orcaDetails, _ = client.GetInstanceDetails(&result)
+			if len(searchResults) > 0  && len(searchResults[0].Results) > 0{
+				result := searchResults[0].Results[0]
+				orcaDetails, _ = client.GetInstanceDetails(result)
+			}
 		}
 		draw(execution)
 	}
@@ -132,10 +142,12 @@ func RenderPipeline(executionId string) {
 	})
 
 	ui.Handle("/sys/kbd/l", func(e ui.Event) {
-		tomcatLogUrl := fmt.Sprintf("http://%s:7001/AdminLogs/list?view=tomcat/catalina.out", orcaDetails.PrivateIpAddress)
-		debug.Log(orcaDetails.PrivateIpAddress)
-		cmd := exec.Command("open", tomcatLogUrl)
-		go cmd.Start()
+		if orcaDetails != nil {
+			tomcatLogUrl := fmt.Sprintf("http://%s:7001/AdminLogs/list?view=tomcat/catalina.out", orcaDetails.PrivateIpAddress)
+			debug.Log(orcaDetails.PrivateIpAddress)
+			cmd := exec.Command("open", tomcatLogUrl)
+			go cmd.Start()
+		}
 	})
 
 	ui.Loop()

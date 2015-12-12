@@ -11,86 +11,7 @@ import (
 
 var DefalutClient = NewClient(nil)
 
-type Client struct {
-	BaseUrl *url.URL
-	UserAgent string
-	agent *gorequest.SuperAgent
-}
 
-type Execution struct {
-	Application string
-	Status string
-	Name string
-	StartTime int
-	EndTime int
-	ExecutingInstance string
-	Stages []Stage
-	Trigger Trigger
-}
-
-type Context struct {
-	Exception Exception
-}
-
-type Exception struct {
-	Details ExcptionDetails
-}
-
-type ExcptionDetails struct {
-	Error string
-	Errors []string
-	StackTrace string
-}
-
-type Trigger struct {
-	User string
-	Type string
-}
-
-type Stage struct {
-	Type string
-	Name string
-	Status string
-	StartTime int
-	EndTime int
-	Tasks []Task
-	Context Context
-}
-
-type Task struct {
-	Id string
-	Name string
-	StartTime int
-	EndTime int
-	Status string
-}
-
-type SearchResult struct {
-	Results []Instance
-}
-
-type Instance struct {
-	Provider string
-	Type string
-	Account string
-	Region string
-	InstanceId string
-	Application string
-	Cluster string
-	ServerGroup string
-}
-
-type InstanceDetail struct {
-	Name string
-	HealthState string
-	PrivateIpAddress string
-	InsightActions []InsightActions
-}
-
-type InsightActions struct {
-	Url string
-	Label string
-}
 
 func (c *Client) GetExecutionById(id string) (*Execution, error) {
 	rel, err := url.Parse("/pipelines/" + id)
@@ -110,7 +31,7 @@ func (c *Client) GetExecutionById(id string) (*Execution, error) {
 	return execution, nil
 }
 
-func (c *Client) GetInstanceDetails(instance *Instance) (*InstanceDetail, error) {
+func (c *Client) GetInstanceDetails(instance Instance) (*InstanceDetail, error) {
 	urlString := fmt.Sprintf("/instances/%s/%s/%s", instance.Account, instance.Region, instance.InstanceId)
 	rel, err := url.Parse(urlString)
 	if err != nil {
@@ -125,10 +46,10 @@ func (c *Client) GetInstanceDetails(instance *Instance) (*InstanceDetail, error)
 	return instanceDetail, nil
 }
 
-func (c *Client) InstanceSearch(instanceId string) (*[]SearchResult, error) {
+func (c *Client) InstanceSearch(instanceId string) ([]SearchResult, error) {
 	rel, err := url.Parse("/search")
 	if err != nil {
-		return &[]SearchResult{}, err
+		return []SearchResult{}, err
 	}
 	q := rel.Query()
 	q.Set("q", instanceId)
@@ -142,7 +63,7 @@ func (c *Client) InstanceSearch(instanceId string) (*[]SearchResult, error) {
 	_, body, _ := gorequest.New().Get(url.String()).End()
 
 	prettyPrintJson(body)
-	var results *[]SearchResult
+	var results []SearchResult
 	json.Unmarshal([]byte(body), &results)
 	return results, nil
 
