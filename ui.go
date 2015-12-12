@@ -10,8 +10,9 @@ import (
 
 var (
 	client = DefalutClient
+	showSucceeded = true
 	orcaDetails *InstanceDetail
-	actions = map[string]string{"q":"Quit"}
+	actions = map[string]string{"q":"Quit", "f":"Toggle Success"}
 	instructions = ui.NewPar("")
 	info = ui.NewList()
 	stages = ui.NewList()
@@ -56,6 +57,7 @@ func drawStages(exe *Execution) {
 
 	for i := range exe.Stages {
 		stage := exe.Stages[i]
+
 		statusColor := getStatusColor(stage.Status)
 		stageInfo := fmt.Sprintf("%s [%s]%s", stage.Name, stage.Status, statusColor )
 		stageList = append(stageList, stageInfo)
@@ -67,9 +69,11 @@ func drawStages(exe *Execution) {
 
 		for t := range exe.Stages[i].Tasks {
 			task := exe.Stages[i].Tasks[t]
-			statusColor = getStatusColor(task.Status)
-			taskInfo := fmt.Sprintf("  %s [%s]%s", task.Name, task.Status, statusColor)
-			stageList = append(stageList, taskInfo)
+			if task.Status != "SUCCEEDED" || stage.Status == "SUCCEEDED" && showSucceeded {
+				statusColor = getStatusColor(task.Status)
+				taskInfo := fmt.Sprintf("  %s [%s]%s", task.Name, task.Status, statusColor)
+				stageList = append(stageList, taskInfo)
+			}
 		}
 	}
 	stages.Items = stageList
@@ -135,6 +139,11 @@ func RenderPipeline(executionId string) {
 		ui.Body.Width = ui.TermWidth()
 		ui.Body.Align()
 		ui.Render(ui.Body)
+	})
+
+	ui.Handle("/sys/kbd/f", func(e ui.Event) {
+		showSucceeded = !showSucceeded
+		fetchAndDraw()
 	})
 
 	ui.Handle("/sys/kbd/q", func(e ui.Event) {
