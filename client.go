@@ -66,7 +66,28 @@ func (c *Client) InstanceSearch(instanceId string) ([]SearchResult, error) {
 	var results []SearchResult
 	json.Unmarshal([]byte(body), &results)
 	return results, nil
+}
 
+func (c *Client) GetAutoScalingActivity(urls []string, ch chan<- []AutoScalingActivity) {
+//	ch := make(chan []AutoScalingActivity, len(urls))
+//	responses := []AutoScalingActivity{}
+	for _, url := range urls {
+		go func(url string) {
+			_, body, _ := gorequest.New().Get(url).End()
+			var results []AutoScalingActivity
+			json.Unmarshal([]byte(body), &results)
+			ch <- results
+		}(url)
+	}
+
+//	for {
+//		select {
+//		case r := <-ch:
+//			responses = append(responses, r...)
+//			return responses
+//		}
+//	}
+//	return responses
 }
 
 func unmarshallExecutionJSON(jsonString string) *Execution  {

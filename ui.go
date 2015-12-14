@@ -6,13 +6,22 @@ import (
 	"os/exec"
 	"fmt"
 	"github.com/gizak/termui/debug"
+	"strings"
 )
 
 var (
 	client = DefalutClient
 	showSucceeded = true
 	orcaDetails *InstanceDetail
-	actions = map[string]string{"q":"Quit", "f":"Toggle Success"}
+	execution *Execution
+	autoScalingActivities []AutoScalingActivity
+	actions = map[string]string{
+		"q":"Quit",
+		"f":"Toggle Success",
+		"s":"Source JSON",
+		"p":"Pipeline",
+		"c":"Config",
+	}
 	instructions = ui.NewPar("")
 	info = ui.NewList()
 	stages = ui.NewList()
@@ -42,7 +51,33 @@ func drawInfo(exe *Execution) {
 		"Name: " + exe.Name,
 		fmt.Sprintf("Status: [%s]%s",  exe.Status, getStatusColor(exe.Status)),
 	}
+
+	badScalingActivities := []AutoScalingActivity{}
+	for _, activity := range autoScalingActivities {
+		if activity.StatusCode != "Successful" {
+			badScalingActivities = append(badScalingActivities, activity)
+		}
+	}
+
+	if len(badScalingActivities) > 0 {
+		st := []string{}
+		for _, badActivity := range badScalingActivities {
+			st = append(st, fmt.Sprintf("%s: %s", badActivity.AutoScalingGroupName, badActivity.StatusCode))
+		}
+		info.Items = append(info.Items, "Scaling Activity:" + strings.Join(st, " "))
+	} else {
+		info.Items = append(info.Items, "Scaling Activity: [Success](fg-green)")
+	}
+
+
 	info.Height = len(info.Items) + 2
+}
+
+func getDuration(startTime int64, endTime int64) string {
+	start := time.Unix(0, startTime * 1000000)
+	end := time.Unix(0, endTime * 1000000)
+	stageDuration := end.Sub(start)
+	return stageDuration.String()
 }
 
 func drawStages(exe *Execution) {
@@ -59,7 +94,8 @@ func drawStages(exe *Execution) {
 		stage := exe.Stages[i]
 
 		statusColor := getStatusColor(stage.Status)
-		stageInfo := fmt.Sprintf("%s [%s]%s", stage.Name, stage.Status, statusColor )
+		stageDuration := getDuration(stage.StartTime, stage.EndTime)
+		stageInfo := fmt.Sprintf("%s [%s %s]%s", stage.Name, stage.Status, stageDuration, statusColor )
 		stageList = append(stageList, stageInfo)
 
 		if &stage.Context.Exception != nil {
@@ -71,7 +107,8 @@ func drawStages(exe *Execution) {
 			task := exe.Stages[i].Tasks[t]
 			if task.Status != "SUCCEEDED" || stage.Status == "SUCCEEDED" && showSucceeded {
 				statusColor = getStatusColor(task.Status)
-				taskInfo := fmt.Sprintf("  %s [%s]%s", task.Name, task.Status, statusColor)
+				taskDuration := getDuration(task.StartTime, task.EndTime)
+				taskInfo := fmt.Sprintf("  %s [%s %s]%s", task.Name, task.Status, taskDuration, statusColor)
 				stageList = append(stageList, taskInfo)
 			}
 		}
@@ -94,7 +131,7 @@ func RenderPipeline(executionId string) {
 			ui.NewCol(12, 0, instructions),
 		),
 		ui.NewRow(
-			ui.NewCol(5, 0, info),
+			ui.NewCol(12, 0, info),
 		),
 		ui.NewRow(
 			ui.NewCol(5, 0, stages),
@@ -116,7 +153,7 @@ func RenderPipeline(executionId string) {
 	}
 
 	fetchAndDraw := func() {
-		execution, _ := client.GetExecutionById(executionId)
+		execution, _ = client.GetExecutionById(executionId)
 
 		if orcaDetails == nil {
 			debug.Log("fetching orca details\n")
@@ -126,6 +163,13 @@ func RenderPipeline(executionId string) {
 				orcaDetails, _ = client.GetInstanceDetails(result)
 			}
 		}
+
+		autoscalingUrls := execution.getScalingActivitiesUrls()
+		ch := make(chan []AutoScalingActivity, len(autoscalingUrls))
+		client.GetAutoScalingActivity(autoscalingUrls,ch)
+		activity := <-ch
+		autoScalingActivities = append(autoScalingActivities, (activity)...)
+
 		draw(execution)
 	}
 
@@ -157,6 +201,24 @@ func RenderPipeline(executionId string) {
 			cmd := exec.Command("open", tomcatLogUrl)
 			go cmd.Start()
 		}
+	})
+
+	ui.Handle("/sys/kbd/s", func(e ui.Event) {
+		sourceUrl := fmt.Sprintf("http://spinnaker-api.prod.netflix.net/pipelines/%s", executionId)
+		cmd := exec.Command("open", sourceUrl)
+		go cmd.Start()
+	})
+
+	ui.Handle("/sys/kbd/p", func(e ui.Event) {
+		pipelineUrl := fmt.Sprintf("http://spinnaker.prod.netflix.net/#/applications/%s/executions/%s", execution.Application, execution.Id )
+		cmd := exec.Command("open", pipelineUrl)
+		go cmd.Start()
+	})
+
+	ui.Handle("/sys/kbd/c", func(e ui.Event) {
+		pipelineUrl := fmt.Sprintf("http://spinnaker.prod.netflix.net/#/applications/%s/executions/configure/%s", execution.Application, execution.PipelineConfigId )
+		cmd := exec.Command("open", pipelineUrl)
+		go cmd.Start()
 	})
 
 	ui.Loop()
